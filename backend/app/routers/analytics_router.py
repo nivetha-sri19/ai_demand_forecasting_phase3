@@ -1,10 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 import pandas as pd
 
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException
+)
+
+from sqlalchemy.orm import Session
+
 from app.database import get_db
+
 from app.models.dataset import Dataset
 from app.models.user import User
+from app.models.forecast_history import (
+    ForecastHistory
+)
+
 from app.auth.oauth2 import get_current_user
 
 
@@ -14,204 +25,768 @@ router = APIRouter(
 )
 
 
-# =========================================
-# DATASET SUMMARY API
-# =========================================
+# ==================================
+# LOAD DATASET HELPER
+# ==================================
+
+def load_latest_dataset(
+    db: Session,
+    current_user: User
+):
+
+    dataset = db.query(Dataset).filter(
+
+        Dataset.uploaded_by == current_user.id
+
+    ).order_by(
+
+        Dataset.created_at.desc()
+
+    ).first()
+
+    if not dataset:
+
+        raise HTTPException(
+
+            status_code=404,
+
+            detail="No dataset found"
+        )
+
+    try:
+
+        if dataset.file_path.endswith(".csv"):
+
+            df = pd.read_csv(
+                dataset.file_path
+            )
+
+        else:
+
+            df = pd.read_excel(
+                dataset.file_path
+            )
+
+        # DEBUGGING
+        print("\n========== DATASET LOADED ==========")
+        print("Filename:", dataset.filename)
+        print("Columns:", df.columns.tolist())
+        print("====================================\n")
+
+    except Exception as e:
+
+        raise HTTPException(
+
+            status_code=500,
+
+            detail=f"Error reading dataset: {str(e)}"
+        )
+
+    return dataset, df
+
+
+# ==================================
+# DETECT COLUMNS
+# ==================================
+
+def detect_columns(df):
+
+    date_column = None
+
+    sales_column = None
+
+    category_column = None
+
+    product_column = None
+
+    region_column = None
+
+    for col in df.columns:
+
+        col_name = str(col).lower().strip()
+
+        # DATE COLUMN
+        if (
+            "date" in col_name
+            or "time" in col_name
+            or "month" in col_name
+            or "year" in col_name
+        ):
+
+            date_column = col
+
+        # SALES COLUMN
+        if (
+
+            "sales" in col_name
+            or "revenue" in col_name
+            or "amount" in col_name
+            or "income" in col_name
+            or "profit" in col_name
+            or "price" in col_name
+            or "demand" in col_name
+            or "quantity" in col_name
+        ):
+
+            sales_column = col
+
+        # CATEGORY COLUMN
+        if (
+            "category" in col_name
+            or "type" in col_name
+        ):
+
+            category_column = col
+
+        # PRODUCT COLUMN
+        if (
+            "product" in col_name
+            or "item" in col_name
+            or "name" in col_name
+        ):
+
+            product_column = col
+
+        # REGION COLUMN
+        if (
+
+            "region" in col_name
+            or "state" in col_name
+            or "city" in col_name
+            or "location" in col_name
+        ):
+
+            region_column = col
+
+    # DEBUGGING
+    print("\n========== DETECTED COLUMNS ==========")
+    print("Date Column:", date_column)
+    print("Sales Column:", sales_column)
+    print("Category Column:", category_column)
+    print("Product Column:", product_column)
+    print("Region Column:", region_column)
+    print("======================================\n")
+
+    return {
+
+        "date": date_column,
+
+        "sales": sales_column,
+
+        "category": category_column,
+
+        "product": product_column,
+
+        "region": region_column
+    }
+
+
+# ==================================
+# DATASET SUMMARY
+# ==================================
 
 @router.get("/summary")
 def dataset_summary(
 
     db: Session = Depends(get_db),
 
-    current_user: User = Depends(get_current_user)
-
+    current_user: User = Depends(
+        get_current_user
+    )
 ):
 
-    # =========================================
-    # GET DATASET
-    # =========================================
+    dataset, df = load_latest_dataset(
+        db,
+        current_user
+    )
 
-    dataset = db.query(Dataset).filter(
+    columns = detect_columns(df)
 
-        Dataset.uploaded_by == current_user.id
+    total_rows = len(df)
 
-    ).order_by(
+    total_columns = len(df.columns)
 
-        Dataset.created_at.desc()
+    total_sales = 0
 
-    ).first()
+    average_sales = 0
 
-    if not dataset:
+    top_products = []
 
-        raise HTTPException(
+    if columns["sales"]:
 
-            status_code=404,
+        total_sales = float(
 
-            detail="No dataset found"
+            df[columns["sales"]]
+            .sum()
         )
 
-    # =========================================
-    # READ FILE
-    # =========================================
+        average_sales = float(
 
-    try:
-
-        if dataset.file_path.endswith(".csv"):
-
-            df = pd.read_csv(dataset.file_path)
-
-        else:
-
-            df = pd.read_excel(dataset.file_path)
-
-    except Exception as e:
-
-        raise HTTPException(
-
-            status_code=500,
-
-            detail=f"Error reading dataset: {str(e)}"
+            df[columns["sales"]]
+            .mean()
         )
 
-    # =========================================
-    # SUMMARY
-    # =========================================
+    if (
+
+        columns["product"]
+        and columns["sales"]
+    ):
+
+        top_products = (
+
+            df.groupby(
+
+                columns["product"]
+
+            )[columns["sales"]]
+
+            .sum()
+
+            .sort_values(
+                ascending=False
+            )
+
+            .head(5)
+
+            .to_dict()
+        )
 
     return {
 
-        "total_rows": len(df),
+        "filename": dataset.filename,
 
-        "total_columns": len(df.columns),
+        "total_rows": total_rows,
 
-        "columns": list(df.columns),
+        "total_columns": total_columns,
 
-        "missing_values": df.isnull().sum().to_dict()
+        "total_sales": round(
+            total_sales,
+            2
+        ),
+
+        "average_sales": round(
+            average_sales,
+            2
+        ),
+
+        "top_products": top_products,
+
+        "columns": list(df.columns)
     }
 
 
-# =========================================
-# MONTHLY SALES ANALYTICS API
-# =========================================
+# ==================================
+# MONTHLY SALES TREND
+# ==================================
 
 @router.get("/monthly-sales")
 def monthly_sales(
 
     db: Session = Depends(get_db),
 
-    current_user: User = Depends(get_current_user)
-
+    current_user: User = Depends(
+        get_current_user
+    )
 ):
 
-    # =========================================
-    # GET DATASET
-    # =========================================
+    _, df = load_latest_dataset(
+        db,
+        current_user
+    )
 
-    dataset = db.query(Dataset).filter(
+    columns = detect_columns(df)
 
-        Dataset.uploaded_by == current_user.id
+    if (
 
-    ).order_by(
-
-        Dataset.created_at.desc()
-
-    ).first()
-
-    if not dataset:
+        not columns["date"]
+        or not columns["sales"]
+    ):
 
         raise HTTPException(
 
-            status_code=404,
+            status_code=400,
 
-            detail="No dataset found"
+            detail="Required columns not found"
         )
 
-    # =========================================
-    # READ FILE
-    # =========================================
+    df[columns["date"]] = pd.to_datetime(
+        df[columns["date"]]
+    )
 
-    try:
+    df["month"] = df[
+        columns["date"]
+    ].dt.strftime("%Y-%m")
 
-        if dataset.file_path.endswith(".csv"):
+    monthly_sales_data = (
 
-            df = pd.read_csv(dataset.file_path)
+        df.groupby("month")[
+            columns["sales"]
+        ]
 
-        else:
+        .sum()
 
-            df = pd.read_excel(dataset.file_path)
+        .reset_index()
+    )
 
-    except Exception as e:
-
-        raise HTTPException(
-
-            status_code=500,
-
-            detail=f"Error reading dataset: {str(e)}"
-        )
-
-    # =========================================
-    # REQUIRED COLUMNS
-    # =========================================
-
-    required_columns = [
-
-        "Date",
-
-        "Units_Sold"
-    ]
-
-    for col in required_columns:
-
-        if col not in df.columns:
-
-            raise HTTPException(
-
-                status_code=400,
-
-                detail=f"Missing column: {col}"
-            )
-
-    # =========================================
-    # PROCESS DATA
-    # =========================================
-
-    try:
-
-        df["Date"] = pd.to_datetime(df["Date"])
-
-        df["Month"] = df["Date"].dt.strftime("%Y-%m")
-
-        monthly_sales_data = (
-
-            df.groupby("Month")["Units_Sold"]
-            .sum()
-            .reset_index()
-        )
-
-    except Exception as e:
-
-        raise HTTPException(
-
-            status_code=500,
-
-            detail=f"Error processing dataset: {str(e)}"
-        )
-
-    # =========================================
-    # RESPONSE
-    # =========================================
-
-    result = []
+    results = []
 
     for _, row in monthly_sales_data.iterrows():
 
-        result.append({
+        results.append({
 
-            "month": row["Month"],
+            "month": row["month"],
 
-            "total_units_sold": int(row["Units_Sold"])
+            "sales": float(
+                row[columns["sales"]]
+            )
         })
 
     return {
 
-        "monthly_sales": result
+        "monthly_sales": results
+    }
+
+
+# ==================================
+# CATEGORY SALES ANALYTICS
+# ==================================
+
+@router.get("/category-sales")
+def category_sales_analytics(
+
+    db: Session = Depends(get_db),
+
+    current_user: User = Depends(
+        get_current_user
+    )
+):
+
+    _, df = load_latest_dataset(
+        db,
+        current_user
+    )
+
+    columns = detect_columns(df)
+
+    if (
+
+        not columns["category"]
+        or not columns["sales"]
+    ):
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail="Category or Sales column not found"
+        )
+
+    category_sales = (
+
+        df.groupby(
+
+            columns["category"]
+
+        )[columns["sales"]]
+
+        .sum()
+
+        .reset_index()
+    )
+
+    results = []
+
+    for _, row in category_sales.iterrows():
+
+        results.append({
+
+            "category": str(
+                row[columns["category"]]
+            ),
+
+            "total_sales": float(
+                row[columns["sales"]]
+            )
+        })
+
+    return {
+
+        "category_sales": results
+    }
+
+
+# ==================================
+# REGION SALES ANALYTICS
+# ==================================
+
+@router.get("/region-sales")
+def region_sales_analytics(
+
+    db: Session = Depends(get_db),
+
+    current_user: User = Depends(
+        get_current_user
+    )
+):
+
+    _, df = load_latest_dataset(
+        db,
+        current_user
+    )
+
+    columns = detect_columns(df)
+
+    if not columns["sales"]:
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail="Sales column not found"
+        )
+
+    if not columns["region"]:
+
+        return {
+
+            "message": "Region data not available in dataset"
+        }
+
+    region_sales = (
+
+        df.groupby(
+
+            columns["region"]
+
+        )[columns["sales"]]
+
+        .sum()
+
+        .reset_index()
+    )
+
+    results = []
+
+    for _, row in region_sales.iterrows():
+
+        results.append({
+
+            "region": str(
+                row[columns["region"]]
+            ),
+
+            "total_sales": float(
+                row[columns["sales"]]
+            )
+        })
+
+    return {
+
+        "region_sales": results
+    }
+
+
+# ==================================
+# TOP REGIONS
+# ==================================
+
+@router.get("/top-regions")
+def top_regions(
+
+    db: Session = Depends(get_db),
+
+    current_user: User = Depends(
+        get_current_user
+    )
+):
+
+    _, df = load_latest_dataset(
+        db,
+        current_user
+    )
+
+    columns = detect_columns(df)
+
+    if (
+
+        not columns["region"]
+        or not columns["sales"]
+    ):
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail="Region data not found"
+        )
+
+    top_regions_data = (
+
+        df.groupby(
+
+            columns["region"]
+
+        )[columns["sales"]]
+
+        .sum()
+
+        .sort_values(
+            ascending=False
+        )
+
+        .head(5)
+
+        .reset_index()
+    )
+
+    results = []
+
+    for _, row in top_regions_data.iterrows():
+
+        results.append({
+
+            "region": str(
+                row[columns["region"]]
+            ),
+
+            "total_sales": float(
+                row[columns["sales"]]
+            )
+        })
+
+    return {
+
+        "top_regions": results
+    }
+
+
+# ==================================
+# DATE RANGE ANALYTICS
+# ==================================
+
+@router.get("/date-range")
+def date_range_analytics(
+
+    start_date: str,
+
+    end_date: str,
+
+    db: Session = Depends(get_db),
+
+    current_user: User = Depends(
+        get_current_user
+    )
+):
+
+    _, df = load_latest_dataset(
+        db,
+        current_user
+    )
+
+    columns = detect_columns(df)
+
+    if (
+
+        not columns["date"]
+        or not columns["sales"]
+    ):
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail="Required columns not found"
+        )
+
+    df[columns["date"]] = pd.to_datetime(
+        df[columns["date"]]
+    )
+
+    start = pd.to_datetime(start_date)
+
+    end = pd.to_datetime(end_date)
+
+    filtered_df = df[
+
+        (df[columns["date"]] >= start)
+
+        &
+
+        (df[columns["date"]] <= end)
+    ]
+
+    total_sales = float(
+
+        filtered_df[
+            columns["sales"]
+        ].sum()
+    )
+
+    total_records = len(
+        filtered_df
+    )
+
+    average_sales = 0
+
+    if not filtered_df.empty:
+
+        average_sales = float(
+
+            filtered_df[
+                columns["sales"]
+            ].mean()
+        )
+
+    return {
+
+        "start_date": start_date,
+
+        "end_date": end_date,
+
+        "total_records": total_records,
+
+        "total_sales": round(
+            total_sales,
+            2
+        ),
+
+        "average_sales": round(
+            average_sales,
+            2
+        )
+    }
+
+
+# ==================================
+# RECENT FORECAST ACTIVITIES
+# ==================================
+
+@router.get("/recent-activities")
+def recent_forecast_activities(
+
+    db: Session = Depends(get_db),
+
+    current_user: User = Depends(
+        get_current_user
+    )
+):
+
+    activities = db.query(
+
+        ForecastHistory
+
+    ).filter(
+
+        ForecastHistory.user_id == current_user.id
+
+    ).order_by(
+
+        ForecastHistory.created_at.desc()
+
+    ).limit(10).all()
+
+    results = []
+
+    for item in activities:
+
+        results.append({
+
+            "model_used": item.model_used,
+
+            "category": item.category,
+
+            "product": item.product,
+
+            "forecast_months": item.forecast_months,
+
+            "mape": item.mape,
+
+            "mae": item.mae,
+
+            "rmse": item.rmse,
+
+            "created_at": item.created_at
+        })
+
+    return {
+
+        "recent_activities": results
+    }
+
+
+# ==================================
+# KPI ANALYTICS
+# ==================================
+
+@router.get("/kpis")
+def analytics_kpis(
+
+    db: Session = Depends(get_db),
+
+    current_user: User = Depends(
+        get_current_user
+    )
+):
+
+    _, df = load_latest_dataset(
+        db,
+        current_user
+    )
+
+    columns = detect_columns(df)
+
+    if not columns["sales"]:
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail="Sales column not found"
+        )
+
+    total_sales = float(
+
+        df[columns["sales"]]
+        .sum()
+    )
+
+    average_sales = float(
+
+        df[columns["sales"]]
+        .mean()
+    )
+
+    highest_sale = float(
+
+        df[columns["sales"]]
+        .max()
+    )
+
+    lowest_sale = float(
+
+        df[columns["sales"]]
+        .min()
+    )
+
+    return {
+
+        "total_sales": round(
+            total_sales,
+            2
+        ),
+
+        "average_sales": round(
+            average_sales,
+            2
+        ),
+
+        "highest_sale": round(
+            highest_sale,
+            2
+        ),
+
+        "lowest_sale": round(
+            lowest_sale,
+            2
+        )
     }

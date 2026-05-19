@@ -1,10 +1,37 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+import os
 import pandas as pd
 
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle
+)
+
+from app.models.report import Report
+
+from reportlab.lib import colors
+
+from reportlab.lib.styles import getSampleStyleSheet
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException
+)
+
+from fastapi.responses import FileResponse
+
+from sqlalchemy.orm import Session
+
+from sklearn.linear_model import LinearRegression
+
 from app.database import get_db
+
 from app.models.dataset import Dataset
 from app.models.user import User
+
 from app.auth.oauth2 import get_current_user
 
 
@@ -14,22 +41,23 @@ router = APIRouter(
 )
 
 
-# =========================================
-# SALES REPORT API
-# =========================================
+# ==================================
+# EXPORT EXCEL REPORT
+# ==================================
 
-@router.get("/sales-report")
-def sales_report(
+@router.get("/export-excel")
+def export_excel_report(
 
     db: Session = Depends(get_db),
 
-    current_user: User = Depends(get_current_user)
-
+    current_user: User = Depends(
+        get_current_user
+    )
 ):
 
-    # =========================================
+    # ============================
     # GET DATASET
-    # =========================================
+    # ============================
 
     dataset = db.query(Dataset).filter(
 
@@ -50,19 +78,28 @@ def sales_report(
             detail="No dataset found"
         )
 
-    # =========================================
-    # READ DATASET
-    # =========================================
+    # ============================
+    # READ FILE
+    # ============================
 
     try:
 
         if dataset.file_path.endswith(".csv"):
 
-            df = pd.read_csv(dataset.file_path)
+            df = pd.read_csv(
+                dataset.file_path
+            )
 
         else:
 
-            df = pd.read_excel(dataset.file_path)
+            df = pd.read_excel(
+                dataset.file_path
+            )
+
+        # DEBUGGING
+        print("\n========== EXCEL REPORT DATASET ==========")
+        print(df.columns.tolist())
+        print("==========================================\n")
 
     except Exception as e:
 
@@ -70,67 +107,298 @@ def sales_report(
 
             status_code=500,
 
-            detail=f"Error reading dataset: {str(e)}"
+            detail=str(e)
         )
 
-    # =========================================
-    # REQUIRED COLUMNS
-    # =========================================
+    # ============================
+    # DETECT COLUMNS
+    # ============================
 
-    required_columns = [
+    date_column = None
+    sales_column = None
 
-        "Date",
+    category_column = None
+    product_column = None
 
-        "Product_Name",
+    for col in df.columns:
 
-        "Category",
+        col_name = str(col).lower().strip()
 
-        "Units_Sold",
+        # DATE COLUMN
+        if (
+            "date" in col_name
+            or "time" in col_name
+            or "month" in col_name
+            or "year" in col_name
+        ):
 
-        "Price"
+            date_column = col
+
+        # SALES COLUMN
+        if (
+            "sales" in col_name
+            or "revenue" in col_name
+            or "amount" in col_name
+            or "income" in col_name
+            or "profit" in col_name
+            or "price" in col_name
+            or "demand" in col_name
+            or "quantity" in col_name
+        ):
+
+            sales_column = col
+
+        # CATEGORY COLUMN
+        if (
+            "category" in col_name
+            or "type" in col_name
+        ):
+
+            category_column = col
+
+        # PRODUCT COLUMN
+        if (
+            "product" in col_name
+            or "item" in col_name
+            or "name" in col_name
+        ):
+
+            product_column = col
+
+    # DEBUGGING
+    print("Date Column:", date_column)
+    print("Sales Column:", sales_column)
+    print("Category Column:", category_column)
+    print("Product Column:", product_column)
+
+    if not date_column or not sales_column:
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail="Required columns not found"
+        )
+
+    # ============================
+    # PROCESS MONTHLY DATA
+    # ============================
+
+    df[date_column] = pd.to_datetime(
+        df[date_column]
+    )
+
+    df["month"] = df[
+        date_column
+    ].dt.to_period("M")
+
+    monthly_data = (
+
+        df.groupby("month")[sales_column]
+        .sum()
+        .reset_index()
+
+    )
+
+    # ============================
+    # FORECASTING
+    # ============================
+
+    monthly_data["month_index"] = range(
+        len(monthly_data)
+    )
+
+    X = monthly_data[[
+        "month_index"
+    ]]
+
+    y = monthly_data[
+        sales_column
     ]
 
-    for col in required_columns:
+    model = LinearRegression()
 
-        if col not in df.columns:
+    model.fit(X, y)
 
-            raise HTTPException(
+    future_indexes = pd.DataFrame({
 
-                status_code=400,
+        "month_index": range(
 
-                detail=f"Missing column: {col}"
+            len(monthly_data),
+
+            len(monthly_data) + 6
+        )
+    })
+
+    predictions = model.predict(
+        future_indexes
+    )
+
+    # ============================
+    # CREATE FORECAST DATAFRAME
+    # ============================
+
+    last_month = monthly_data[
+        "month"
+    ].iloc[-1]
+
+    forecast_rows = []
+
+    for i, prediction in enumerate(
+        predictions,
+        start=1
+    ):
+
+        forecast_rows.append({
+
+            "month": (
+                last_month + i
+            ).strftime("%Y-%m"),
+
+            "predicted_revenue": round(
+                float(prediction),
+                2
             )
+        })
 
-    # =========================================
-    # PROCESS DATA
-    # =========================================
+    forecast_df = pd.DataFrame(
+        forecast_rows
+    )
+
+    # ============================
+    # CREATE REPORTS FOLDER
+    # ============================
+
+    os.makedirs(
+        "reports",
+        exist_ok=True
+    )
+
+    report_path = (
+        "reports/forecast_report.xlsx"
+    )
+
+    # ============================
+    # WRITE EXCEL FILE
+    # ============================
+
+    with pd.ExcelWriter(
+        report_path,
+        engine="openpyxl"
+    ) as writer:
+
+        monthly_data.to_excel(
+
+            writer,
+
+            sheet_name="Monthly Sales",
+
+            index=False
+        )
+
+        forecast_df.to_excel(
+
+            writer,
+
+            sheet_name="Forecast",
+
+            index=False
+        )
+
+    # ============================
+    # SAVE REPORT METADATA
+    # ============================
+
+    report = Report(
+
+        user_id=current_user.id,
+
+        report_name="forecast_report.xlsx",
+
+        report_type="Excel",
+
+        file_path=report_path
+    )
+
+    db.add(report)
+
+    db.commit()
+
+    # ============================
+    # RETURN FILE
+    # ============================
+
+    return FileResponse(
+
+        path=report_path,
+
+        filename="forecast_report.xlsx",
+
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    )
+
+
+# ==================================
+# EXPORT PDF REPORT
+# ==================================
+
+@router.get("/export-pdf")
+def export_pdf_report(
+
+    db: Session = Depends(get_db),
+
+    current_user: User = Depends(
+        get_current_user
+    )
+):
+
+    # ============================
+    # GET DATASET
+    # ============================
+
+    dataset = db.query(Dataset).filter(
+
+        Dataset.uploaded_by == current_user.id
+
+    ).order_by(
+
+        Dataset.created_at.desc()
+
+    ).first()
+
+    if not dataset:
+
+        raise HTTPException(
+
+            status_code=404,
+
+            detail="No dataset found"
+        )
+
+    # ============================
+    # READ DATASET
+    # ============================
 
     try:
 
-        # TOTAL SALES VALUE
+        if dataset.file_path.endswith(".csv"):
 
-        df["Total_Sales"] = (
+            df = pd.read_csv(
+                dataset.file_path
+            )
 
-            df["Units_Sold"] * df["Price"]
-        )
+        else:
 
-        # CATEGORY WISE SALES
+            df = pd.read_excel(
+                dataset.file_path
+            )
 
-        category_sales = (
-
-            df.groupby("Category")["Total_Sales"]
-            .sum()
-            .reset_index()
-        )
-
-        # PRODUCT WISE SALES
-
-        product_sales = (
-
-            df.groupby("Product_Name")["Total_Sales"]
-            .sum()
-            .reset_index()
-        )
+        # DEBUGGING
+        print("\n========== PDF REPORT DATASET ==========")
+        print(df.columns.tolist())
+        print("========================================\n")
 
     except Exception as e:
 
@@ -138,50 +406,344 @@ def sales_report(
 
             status_code=500,
 
-            detail=f"Error processing dataset: {str(e)}"
+            detail=str(e)
         )
 
-    # =========================================
-    # FORMAT RESPONSE
-    # =========================================
+    # ============================
+    # DETECT COLUMNS
+    # ============================
 
-    category_result = []
+    date_column = None
+    sales_column = None
+    product_column = None
 
-    for _, row in category_sales.iterrows():
+    for col in df.columns:
 
-        category_result.append({
+        col_name = str(col).lower().strip()
 
-            "category": row["Category"],
+        # DATE COLUMN
+        if (
+            "date" in col_name
+            or "time" in col_name
+            or "month" in col_name
+            or "year" in col_name
+        ):
 
-            "total_sales": round(
-                float(row["Total_Sales"]),
-                2
-            )
+            date_column = col
+
+        # SALES COLUMN
+        if (
+            "sales" in col_name
+            or "revenue" in col_name
+            or "amount" in col_name
+            or "income" in col_name
+            or "profit" in col_name
+            or "price" in col_name
+            or "demand" in col_name
+            or "quantity" in col_name
+        ):
+
+            sales_column = col
+
+        # PRODUCT COLUMN
+        if (
+            "product" in col_name
+            or "item" in col_name
+            or "name" in col_name
+        ):
+
+            product_column = col
+
+    # DEBUGGING
+    print("Date Column:", date_column)
+    print("Sales Column:", sales_column)
+    print("Product Column:", product_column)
+
+    if not date_column or not sales_column:
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail="Required columns not found"
+        )
+
+    # ============================
+    # PROCESS DATA
+    # ============================
+
+    total_sales = round(
+        float(df[sales_column].sum()),
+        2
+    )
+
+    total_rows = len(df)
+
+    top_products = []
+
+    if product_column:
+
+        top_products = (
+
+            df.groupby(product_column)[sales_column]
+            .sum()
+            .sort_values(ascending=False)
+            .head(5)
+            .items()
+
+        )
+
+    # ============================
+    # CREATE PDF
+    # ============================
+
+    os.makedirs(
+        "reports",
+        exist_ok=True
+    )
+
+    pdf_path = (
+        "reports/forecast_report.pdf"
+    )
+
+    doc = SimpleDocTemplate(
+        pdf_path
+    )
+
+    styles = getSampleStyleSheet()
+
+    elements = []
+
+    # ============================
+    # TITLE
+    # ============================
+
+    title = Paragraph(
+
+        "AI Demand Forecasting Report",
+
+        styles["Title"]
+    )
+
+    elements.append(title)
+
+    elements.append(
+        Spacer(1, 20)
+    )
+
+    # ============================
+    # SUMMARY
+    # ============================
+
+    summary = [
+
+        ["Metric", "Value"],
+
+        ["Total Revenue", f"₹ {total_sales}"],
+
+        ["Total Rows", str(total_rows)]
+    ]
+
+    summary_table = Table(summary)
+
+    summary_table.setStyle(
+
+        TableStyle([
+
+            ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+
+            ("GRID", (0, 0), (-1, -1), 1, colors.black),
+
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
+        ])
+    )
+
+    elements.append(summary_table)
+
+    elements.append(
+        Spacer(1, 20)
+    )
+
+    # ============================
+    # TOP PRODUCTS
+    # ============================
+
+    top_title = Paragraph(
+
+        "Top Products",
+
+        styles["Heading2"]
+    )
+
+    elements.append(top_title)
+
+    elements.append(
+        Spacer(1, 10)
+    )
+
+    product_data = [
+
+        ["Product", "Revenue"]
+    ]
+
+    for product, revenue in top_products:
+
+        product_data.append([
+
+            str(product),
+
+            f"₹ {round(float(revenue), 2)}"
+        ])
+
+    product_table = Table(
+        product_data
+    )
+
+    product_table.setStyle(
+
+        TableStyle([
+
+            ("BACKGROUND", (0, 0), (-1, 0), colors.lightblue),
+
+            ("GRID", (0, 0), (-1, -1), 1, colors.black),
+
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ])
+    )
+
+    elements.append(product_table)
+
+    # ============================
+    # BUILD PDF
+    # ============================
+
+    doc.build(elements)
+
+    # ============================
+    # SAVE REPORT METADATA
+    # ============================
+
+    report = Report(
+
+        user_id=current_user.id,
+
+        report_name="forecast_report.pdf",
+
+        report_type="PDF",
+
+        file_path=pdf_path
+    )
+
+    db.add(report)
+
+    db.commit()
+
+    # ============================
+    # RETURN FILE
+    # ============================
+
+    return FileResponse(
+
+        path=pdf_path,
+
+        filename="forecast_report.pdf",
+
+        media_type="application/pdf"
+    )
+
+
+# ==================================
+# PAGINATED REPORT LIST
+# ==================================
+
+@router.get("/list")
+def get_paginated_reports(
+
+    page: int = 1,
+
+    limit: int = 5,
+
+    db: Session = Depends(get_db),
+
+    current_user: User = Depends(
+        get_current_user
+    )
+):
+
+    # ============================
+    # VALIDATION
+    # ============================
+
+    if page <= 0:
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail="Page must be greater than 0"
+        )
+
+    if limit <= 0:
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail="Limit must be greater than 0"
+        )
+
+    # ============================
+    # PAGINATION LOGIC
+    # ============================
+
+    skip = (page - 1) * limit
+
+    reports = db.query(Report).filter(
+
+        Report.user_id == current_user.id
+
+    ).order_by(
+
+        Report.created_at.desc()
+
+    ).offset(skip).limit(limit).all()
+
+    total_reports = db.query(Report).filter(
+
+        Report.user_id == current_user.id
+
+    ).count()
+
+    results = []
+
+    for item in reports:
+
+        results.append({
+
+            "id": item.id,
+
+            "report_name": item.report_name,
+
+            "report_type": item.report_type,
+
+            "created_at": item.created_at
         })
 
-    product_result = []
-
-    for _, row in product_sales.iterrows():
-
-        product_result.append({
-
-            "product": row["Product_Name"],
-
-            "total_sales": round(
-                float(row["Total_Sales"]),
-                2
-            )
-        })
-
-    # =========================================
+    # ============================
     # RETURN RESPONSE
-    # =========================================
+    # ============================
 
     return {
 
-        "total_records": len(df),
+        "page": page,
 
-        "category_wise_sales": category_result,
+        "limit": limit,
 
-        "product_wise_sales": product_result
+        "total_reports": total_reports,
+
+        "reports": results
     }

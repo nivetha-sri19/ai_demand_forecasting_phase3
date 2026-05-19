@@ -5,5 +5,20 @@
 body {
   margin: 0;
   padding: 0;
-  font-family: Inter, sans-serif;
+  box-sizing: border-box;
+  font-family: sans-serif;
+  background-color: #f3f4f6;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2563eb;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #e5e7eb;
 }

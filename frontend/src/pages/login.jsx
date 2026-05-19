@@ -1,107 +1,256 @@
-import { useState } from "react";
-import API from "../api/axios";
-import { useNavigate, Link } from "react-router-dom";
+import React, { useState } from "react";
+import axios from "axios";
+import { useNavigate } from "react-router-dom";
 
-function Login() {
+const Login = () => {
   const navigate = useNavigate();
 
-  const [form, setForm] = useState({
-    username: "",
-    password: "",
-  });
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
-  const handleChange = (e) => {
-    setForm({
-      ...form,
-      [e.target.name]: e.target.value,
-    });
-  };
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
+  // =========================
+  // HANDLE LOGIN
+  // =========================
   const handleSubmit = async (e) => {
     e.preventDefault();
 
     try {
-      const formData = new FormData();
+      setLoading(true);
+      setError("");
 
-      formData.append("username", form.username);
-      formData.append("password", form.password);
+      // FORM DATA FOR FASTAPI OAuth2
+      const formData = new URLSearchParams();
 
-      const res = await API.post(
-        "/auth/login",
-        formData
+      formData.append("username", email);
+      formData.append("password", password);
+
+      console.log("Sending Login Request...");
+
+      const response = await axios.post(
+        "http://localhost:8000/auth/login",
+        formData,
+        {
+          headers: {
+            "Content-Type":
+              "application/x-www-form-urlencoded",
+          },
+        }
       );
 
+      console.log("LOGIN RESPONSE:", response.data);
+
+      // STORE TOKEN
       localStorage.setItem(
         "token",
-        res.data.access_token
+        response.data.access_token
       );
 
-      navigate("/dashboard");
+      // OPTIONAL USER DATA
+      if (response.data.user) {
+        localStorage.setItem(
+          "user",
+          JSON.stringify(response.data.user)
+        );
+      }
+
+      alert("Login Successful");
+
+      // NAVIGATE
+      navigate("/forecasting");
 
     } catch (error) {
-      console.log(error);
-      alert("Login Failed");
+
+      console.log("LOGIN ERROR:", error);
+
+      // BACKEND ERROR
+      if (error.response) {
+
+        console.log(
+          "BACKEND RESPONSE:",
+          error.response.data
+        );
+
+        setError(
+          error.response?.data?.detail ||
+          error.response?.data?.message ||
+          JSON.stringify(error.response?.data) ||
+          "Login failed"
+        );
+      }
+
+      // SERVER ERROR
+      else if (error.request) {
+        setError("Backend server not reachable");
+      }
+
+      // OTHER ERROR
+      else {
+        setError(error.message);
+      }
+
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-blue-900 to-indigo-900 px-4">
-
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm"></div>
-
-      <form
-        onSubmit={handleSubmit}
-        className="relative bg-white/10 border border-white/20 backdrop-blur-xl p-10 rounded-3xl shadow-2xl w-full max-w-md"
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        background: "#0f172a",
+        fontFamily: "Arial",
+      }}
+    >
+      <div
+        style={{
+          width: "400px",
+          background: "#1e293b",
+          padding: "35px",
+          borderRadius: "16px",
+          color: "white",
+          boxShadow: "0 0 20px rgba(0,0,0,0.3)",
+        }}
       >
-
-        <h1 className="text-4xl font-bold text-white text-center mb-2">
-          AI Forecast
+        {/* TITLE */}
+        <h1
+          style={{
+            textAlign: "center",
+            marginBottom: "10px",
+            fontSize: "32px",
+            fontWeight: "bold",
+          }}
+        >
+          Forecast AI
         </h1>
 
-        <p className="text-center text-gray-300 mb-8">
-          Advanced Demand Prediction System
-        </p>
-
-        <input
-          type="text"
-          name="username"
-          placeholder="Enter Email"
-          value={form.username}
-          onChange={handleChange}
-          className="w-full p-4 mb-5 rounded-2xl bg-white/10 border border-white/20 text-white placeholder-gray-300 outline-none focus:ring-2 focus:ring-cyan-400"
-        />
-
-        <input
-          type="password"
-          name="password"
-          placeholder="Enter Password"
-          value={form.password}
-          onChange={handleChange}
-          className="w-full p-4 mb-6 rounded-2xl bg-white/10 border border-white/20 text-white placeholder-gray-300 outline-none focus:ring-2 focus:ring-cyan-400"
-        />
-
-        <button
-          type="submit"
-          className="w-full py-4 rounded-2xl bg-cyan-500 hover:bg-cyan-400 text-white font-semibold transition-all duration-300 shadow-lg"
+        <p
+          style={{
+            textAlign: "center",
+            color: "#94a3b8",
+            marginBottom: "30px",
+          }}
         >
-          Login
-        </button>
-
-        <p className="text-center text-gray-300 mt-6">
-          Don’t have an account?
-
-          <Link
-            to="/register"
-            className="text-cyan-300 ml-2 hover:text-white"
-          >
-            Register
-          </Link>
+          Login to continue
         </p>
 
-      </form>
+        {/* ERROR */}
+        {error && (
+          <div
+            style={{
+              background: "#7f1d1d",
+              color: "#fecaca",
+              padding: "12px",
+              borderRadius: "8px",
+              marginBottom: "20px",
+              fontSize: "14px",
+            }}
+          >
+            {String(error)}
+          </div>
+        )}
 
+        {/* FORM */}
+        <form onSubmit={handleSubmit}>
+
+          {/* EMAIL */}
+          <div
+            style={{
+              marginBottom: "20px",
+            }}
+          >
+            <label
+              style={{
+                display: "block",
+                marginBottom: "8px",
+              }}
+            >
+              Email
+            </label>
+
+            <input
+              type="email"
+              value={email}
+              onChange={(e) =>
+                setEmail(e.target.value)
+              }
+              placeholder="Enter email"
+              required
+              style={{
+                width: "100%",
+                padding: "14px",
+                borderRadius: "10px",
+                border: "none",
+                outline: "none",
+                background: "#0f172a",
+                color: "white",
+              }}
+            />
+          </div>
+
+          {/* PASSWORD */}
+          <div
+            style={{
+              marginBottom: "25px",
+            }}
+          >
+            <label
+              style={{
+                display: "block",
+                marginBottom: "8px",
+              }}
+            >
+              Password
+            </label>
+
+            <input
+              type="password"
+              value={password}
+              onChange={(e) =>
+                setPassword(e.target.value)
+              }
+              placeholder="Enter password"
+              required
+              style={{
+                width: "100%",
+                padding: "14px",
+                borderRadius: "10px",
+                border: "none",
+                outline: "none",
+                background: "#0f172a",
+                color: "white",
+              }}
+            />
+          </div>
+
+          {/* BUTTON */}
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              width: "100%",
+              padding: "14px",
+              borderRadius: "10px",
+              border: "none",
+              background: "#2563eb",
+              color: "white",
+              fontWeight: "bold",
+              cursor: "pointer",
+              fontSize: "16px",
+            }}
+          >
+            {loading ? "Logging in..." : "Login"}
+          </button>
+
+        </form>
+      </div>
     </div>
   );
-}
+};
 
 export default Login;
