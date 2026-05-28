@@ -1,0 +1,13 @@
+.dashboard-container {
+  padding: 20px;
+}
+
+.dashboard-title {
+  font-size: 32px;
+  font-weight: bold;
+}
+
+.dashboard-grid {
+  display: grid;
+  gap: 20px;
+}

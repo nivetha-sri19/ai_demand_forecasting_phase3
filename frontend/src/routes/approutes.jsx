@@ -1,96 +1,172 @@
 import {
-  BrowserRouter,
   Routes,
-  Route,
-  Navigate,
-} from "react-router-dom";
+  Route
+} from 'react-router-dom';
 
-import DashboardLayout from "../layouts/DashboardLayout";
+import DashboardLayout from '../layouts/DashboardLayout';
+import AdminLayout from '../layouts/AdminLayout';
+import AuthLayout from '../layouts/AuthLayout';
 
-import AdminLayout from "../layouts/AdminLayout";
+import Login from '../pages/Auth/Login';
+import Register from '../pages/Auth/Register';
+import ForgotPassword from '../pages/Auth/ForgotPassword';
+import ResetPassword from '../pages/Auth/ResetPassword';
 
-import Login from "../pages/Login";
+import Dashboard from '../pages/Dashboard/Dashboard';
 
-import Dashboard from "../pages/Dashboard";
+import Forecasting from '../pages/Forecasting/Forecasting';
+import RealTimeForecasting from '../pages/Forecasting/RealTimeForecasting';
+import ForecastDetails from '../pages/Forecasting/ForecastDetails';
 
-import Forecasting from "../pages/Forecasting";
+import Reports from '../pages/Reports/Reports';
+import ReportDetails from '../pages/Reports/ReportDetails';
 
-import Reports from "../pages/Reports";
+import Datasets from '../pages/Datasets/Datasets';
+import DatasetDetails from '../pages/Datasets/DatasetDetails';
 
-import Notifications from "../pages/Notifications";
+import Notifications from '../pages/Notifications/Notifications';
 
-import AdminDashboard from "../pages/AdminDashboard";
+import AdminDashboard from '../pages/Admin/AdminDashboard';
+import Users from '../pages/Admin/Users';
+import Settings from '../pages/Admin/Settings';
+import Logs from '../pages/Admin/Logs';
 
-import Datasets from "../pages/Datasets";
+import AppSettings from '../pages/Settings/Settings';
 
-import NotFound from "../pages/NotFound";
+import NotFound from '../pages/NotFound/NotFound';
+
+import ProtectedRoute from './ProtectedRoute';
+import AdminRoute from './AdminRoute';
 
 const AppRoutes = () => {
-  const token =
-    localStorage.getItem("token");
-
   return (
-    <BrowserRouter>
-      <Routes>
-        {/* Login Route */}
+    <Routes>
+
+      {/* Auth */}
+
+      <Route element={<AuthLayout />}>
+
+        <Route path="/" element={<Login />} />
+
         <Route
-          path="/"
-          element={
-            token ? (
-              <Navigate to="/dashboard" />
-            ) : (
-              <Login />
-            )
-          }
+          path="/register"
+          element={<Register />}
         />
 
-        {/* Dashboard Layout */}
         <Route
-          element={<DashboardLayout />}
-        >
-          <Route
-            path="/dashboard"
-            element={<Dashboard />}
-          />
-
-          <Route
-            path="/forecasting"
-            element={<Forecasting />}
-          />
-
-          <Route
-            path="/reports"
-            element={<Reports />}
-          />
-
-          <Route
-            path="/notifications"
-            element={<Notifications />}
-          />
-
-          <Route
-            path="/datasets"
-            element={<Datasets />}
-          />
-        </Route>
-
-        {/* Admin Layout */}
-        <Route
-          element={<AdminLayout />}
-        >
-          <Route
-            path="/admin"
-            element={<AdminDashboard />}
-          />
-        </Route>
-
-        {/* Not Found */}
-        <Route
-          path="*"
-          element={<NotFound />}
+          path="/forgot-password"
+          element={<ForgotPassword />}
         />
-      </Routes>
-    </BrowserRouter>
+
+        <Route
+          path="/reset-password"
+          element={<ResetPassword />}
+        />
+
+      </Route>
+
+      {/* Dashboard */}
+
+      <Route
+        element={
+          <ProtectedRoute>
+            <DashboardLayout />
+          </ProtectedRoute>
+        }
+      >
+
+        <Route
+          path="/dashboard"
+          element={<Dashboard />}
+        />
+
+        <Route
+          path="/forecasting"
+          element={<Forecasting />}
+        />
+
+        <Route
+          path="/realtime"
+          element={<RealTimeForecasting />}
+        />
+
+        <Route
+          path="/forecast/:id"
+          element={<ForecastDetails />}
+        />
+
+        <Route
+          path="/reports"
+          element={<Reports />}
+        />
+
+        <Route
+          path="/report/:id"
+          element={<ReportDetails />}
+        />
+
+        <Route
+          path="/datasets"
+          element={<Datasets />}
+        />
+
+        <Route
+          path="/dataset/:id"
+          element={<DatasetDetails />}
+        />
+
+        <Route
+          path="/notifications"
+          element={<Notifications />}
+        />
+
+        <Route
+          path="/settings"
+          element={<AppSettings />}
+        />
+
+      </Route>
+
+      {/* Admin */}
+
+      <Route
+        element={
+          <AdminRoute>
+            <AdminLayout />
+          </AdminRoute>
+        }
+      >
+
+        <Route
+          path="/admin"
+          element={<AdminDashboard />}
+        />
+
+        <Route
+          path="/admin/users"
+          element={<Users />}
+        />
+
+        <Route
+          path="/admin/settings"
+          element={<Settings />}
+        />
+
+        <Route
+          path="/admin/logs"
+          element={<Logs />}
+        />
+
+      </Route>
+
+      {/* 404 */}
+
+      <Route
+        path="*"
+        element={<NotFound />}
+      />
+
+    </Routes>
   );
 };
 

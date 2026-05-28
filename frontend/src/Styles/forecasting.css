@@ -1,0 +1,10 @@
+.forecast-card {
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
+}
+
+.forecast-title {
+  font-size: 24px;
+  font-weight: bold;
+}

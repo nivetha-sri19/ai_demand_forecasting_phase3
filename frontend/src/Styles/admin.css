@@ -1,0 +1,9 @@
+.admin-container {
+  padding: 20px;
+}
+
+.admin-card {
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
+}

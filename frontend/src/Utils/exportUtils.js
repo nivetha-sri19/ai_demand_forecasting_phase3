@@ -1,56 +1,65 @@
-export const downloadFile = (
-  blob,
-  filename
+export const exportToCSV = (
+  data,
+  fileName = 'report.csv'
 ) => {
+
+  const csvRows = [];
+
+  const headers =
+    Object.keys(data[0]);
+
+  csvRows.push(headers.join(','));
+
+  for (const row of data) {
+
+    const values = headers.map(
+      (header) => row[header]
+    );
+
+    csvRows.push(values.join(','));
+  }
+
+  const blob = new Blob(
+    [csvRows.join('\n')],
+    {
+      type: 'text/csv'
+    }
+  );
+
   const url =
     window.URL.createObjectURL(blob);
 
-  const link =
-    document.createElement("a");
+  const a =
+    document.createElement('a');
 
-  link.href = url;
+  a.href = url;
 
-  link.setAttribute(
-    "download",
-    filename
-  );
+  a.download = fileName;
 
-  document.body.appendChild(link);
-
-  link.click();
-
-  link.remove();
+  a.click();
 };
 
-export const exportCSV = (
+export const downloadJSON = (
   data,
-  filename = "report.csv"
+  fileName = 'data.json'
 ) => {
-  const csvContent =
-    "data:text/csv;charset=utf-8," +
-    data
-      .map((row) => row.join(","))
-      .join("\n");
 
-  const encodedUri =
-    encodeURI(csvContent);
-
-  const link =
-    document.createElement("a");
-
-  link.setAttribute(
-    "href",
-    encodedUri
+  const blob = new Blob(
+    [JSON.stringify(data, null, 2)],
+    {
+      type: 'application/json'
+    }
   );
 
-  link.setAttribute(
-    "download",
-    filename
-  );
+  const url =
+    window.URL.createObjectURL(blob);
 
-  document.body.appendChild(link);
+  const a =
+    document.createElement('a');
 
-  link.click();
+  a.href = url;
 
-  link.remove();
+  a.download = fileName;
+
+  a.click();
 };

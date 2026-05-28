@@ -1,0 +1,10 @@
+.report-container {
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
+}
+
+.report-title {
+  font-size: 28px;
+  font-weight: bold;
+}
